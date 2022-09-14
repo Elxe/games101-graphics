@@ -39,6 +39,50 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
     return Vector4f(v3.x(), v3.y(), v3.z(), w);
 }
 
+static float partialInsideTri(int x, int y, const Vector3f* _v)
+{
+    Eigen::Vector3f AB = _v[1] - _v[0];
+    Eigen::Vector3f BC = _v[2] - _v[1];
+    Eigen::Vector3f CA = _v[0] - _v[2];
+    
+    auto func = [&](const Eigen::Vector3f& P) -> bool {
+        Eigen::Vector3f AP = P - _v[0];
+        Eigen::Vector3f BP = P - _v[1];
+        Eigen::Vector3f CP = P - _v[2];
+
+        Eigen::Vector3f res0 = AB.cross(AP);
+        Eigen::Vector3f res1 = BC.cross(BP);
+        Eigen::Vector3f res2 = CA.cross(CP);
+
+        if (res0.z() >= 0.0 && res1.z() >= 0.0 && res2.z() >= 0.0 || res0.z() < 0.0 && res1.z() < 0.0 && res2.z() < 0.0) {
+            return true;
+        } else {
+            return false;
+        }
+    };
+
+    Eigen::Vector3f P(0.25+static_cast<float>(x), 0.25+static_cast<float>(y), 0.0);
+    float cnt = 0;
+    if (func(P)) {
+        cnt += 1.0;
+    }
+    P.x() = 0.75+static_cast<float>(x);
+    P.y() = 0.25+static_cast<float>(y);
+    if (func(P)) {
+        cnt += 1.0;
+    }
+    P.x() = 0.25+static_cast<float>(x);
+    P.y() = 0.75+static_cast<float>(y);
+    if (func(P)) {
+        cnt += 1.0;
+    }
+    P.x() = 0.75+static_cast<float>(x);
+    P.y() = 0.75+static_cast<float>(y);
+    if (func(P)) {
+        cnt += 1.0;
+    }
+    return cnt / 4.0;
+}
 
 static bool insideTriangle(int x, int y, const Vector3f* _v)
 {   
@@ -148,21 +192,27 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     Eigen::Vector2d rb(max({Tri[0].x(), Tri[1].x(), Tri[2].x()}), max({Tri[0].y(), Tri[1].y(), Tri[2].y()}));
 
     for (int i = lt.x(); i < rb.x(); i++) {
-        for (int j = lt.y(); j < rb.y(); j++) {
-            if (insideTriangle(i, j, Tri)) {
-                // If so, use the following code to get the interpolated z value.
-                auto[alpha, beta, gamma] = computeBarycentric2D(i, j, t.v);
-                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-                z_interpolated *= w_reciprocal;
-                
-                if (z_interpolated < depth_buf[get_index(i, j)]) {
-                    // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
-                    depth_buf[get_index(i,j)] = z_interpolated;
-                    Eigen::Vector3f point(i, j, 1.0f);
-                    set_pixel(point, t.getColor());
-                    // std::cout << i << " " << j << "print" <<std::endl;
-                }
+        int top = lt.y();
+        int bot = rb.y() - 1;
+        while (top <= bot && !insideTriangle(i, top, Tri)) {
+            top++;
+        }
+        while (top <= bot && !insideTriangle(i, bot, Tri)) {
+            bot--;
+        }
+        for (int j = top; j <= bot; j++) {
+            // If so, use the following code to get the interpolated z value.
+            auto[alpha, beta, gamma] = computeBarycentric2D(i, j, t.v);
+            float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+            float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+            z_interpolated *= w_reciprocal;
+            
+            if (z_interpolated < depth_buf[get_index(i, j)]) {
+                // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
+                depth_buf[get_index(i,j)] = z_interpolated;
+                Eigen::Vector3f point(i, j, 1.0f);
+                set_pixel(point, t.getColor()*partialInsideTri(i, j, Tri));
+                // std::cout << i << " " << j << "print" <<std::endl;
             }
         }
     }
